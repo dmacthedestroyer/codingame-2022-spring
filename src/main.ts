@@ -30,7 +30,7 @@ function action3(state: State): string[] {
         if (closestMonster !== undefined) {
             return `MOVE ${closestMonster.position.x + closestMonster.vx} ${closestMonster.position.y + closestMonster.vy} >:-O`
         } else {
-            const delta = 1600 * (state.basePosition.x === 0 ? 1 : -1)
+            const delta = 2000 * (state.basePosition.x === 0 ? 1 : -1)
             const dx = delta * (state.selfHeroes.length - i);
             const dy = delta * (i + 1)
 
@@ -42,16 +42,13 @@ function action3(state: State): string[] {
 function goalie(hero: Hero, state: State): string {
     const targetPosition = state.basePosition;
 
-    if (hero.position.x !== targetPosition.x || hero.position.y !== targetPosition.y) {
-        return `MOVE ${targetPosition.x} ${targetPosition.y}`
-    }
     const windDistance = 1280;
     const closestMonster = minBy(state.monsters, m => distanceSquared(targetPosition, m.position));
     if (closestMonster !== undefined && distance(closestMonster.position, targetPosition) < windDistance) {
-        return `WIND ${closestMonster.position.x, closestMonster.position.y}`
+        return `SPELL WIND ${closestMonster.position.x} ${closestMonster.position.y} FUS`
     }
 
-    return "WAIT";
+    return `MOVE ${targetPosition.x} ${targetPosition.y} ಠ_ಠ`
 }
 
 
@@ -107,7 +104,8 @@ export function run() {
             monsters
         }
 
-        console.error(countBy(state.monsters, m => m.isTargetingBase))
+        const targetingMonsters = state.monsters.filter(m => m.isTargetingBase).map(({ id, health, position }) => ({ id, health, position, distance: distance(position, state.basePosition) }))
+        sortBy(targetingMonsters, tm => tm.distance).forEach(m => console.error({ ...m, wind: m.distance < 1280 }))
 
         action3(state).forEach(cmd => console.log(cmd))
     }

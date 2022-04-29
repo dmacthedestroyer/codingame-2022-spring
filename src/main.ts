@@ -1,14 +1,4 @@
-import {
-	Base,
-	Coordinate,
-	distance,
-	distanceSquared,
-	Hero,
-	minBy,
-	Monster,
-	sortBy,
-	State
-} from "./state";
+import { Base, Coordinate, distance, distanceSquared, Hero, minBy, Monster, sortBy, State } from "./state";
 
 function silver(state: State): string[] {
 	return state.selfHeroes.map((hero, i) => {
@@ -29,32 +19,35 @@ function goalie(hero: Hero, state: State): string {
 
 	const basePosition = state.selfBase.position;
 
-	const closestMonster = minBy(state.monsters, m =>
-		distanceSquared(basePosition, m.position)
+	const closestMonster = minBy(
+		state.monsters.filter(m => m.shieldLife <= 0),
+		m => distanceSquared(basePosition, m.position)
 	);
 	if (closestMonster !== undefined) {
 		const monsterFuturePosition = {
 			x: closestMonster.position.x + closestMonster.vx,
 			y: closestMonster.position.y + closestMonster.vy
 		};
-		const monsterDistanceFromBase = distance(
-			monsterFuturePosition,
-			basePosition
-		);
-		if (
-			state.selfBase.mana >= 10 &&
-			monsterDistanceFromBase < WIND_DISTANCE * 0.75
-		) {
-			return `SPELL WIND ${closestMonster.position.x} ${closestMonster.position.y} FUS`;
+		const monsterDistanceFromBase = distance(monsterFuturePosition, basePosition);
+		if (state.selfBase.mana >= 10 && monsterDistanceFromBase < WIND_RANGE * 0.75) {
+			return `SPELL WIND ${state.enemyBase.position.x} ${state.enemyBase.position.y} FUS`;
 		}
 	}
 
-	return `MOVE ${basePosition.x} ${basePosition.y} ಠ_ಠ`;
+	if (state.selfBase.mana >= 10) {
+		const closestOpponentHero = minBy(state.opponentHeroes, h => distanceSquared(hero.position, h.position));
+		if (closestOpponentHero !== undefined && distance(closestOpponentHero.position, hero.position) <= WIND_RANGE) {
+			return `SPELL WIND ${closestOpponentHero.position.x} ${closestOpponentHero.position.y} GIT!`;
+		}
+	}
+
+	const delta = (WIND_DISTANCE - WIND_RANGE) * (basePosition.x === 0 ? 1 : -1);
+	return `MOVE ${basePosition.x + delta} ${basePosition.y + delta} ಠ_ಠ`;
 }
 
 function berserker(hero: Hero, state: State): string {
-	const xMin = MAP_WIDTH / 4;
-	const xMax = (3 * MAP_WIDTH) / 4;
+	const xMin = 6000; // MAP_WIDTH / 3;
+	const xMax = MAP_WIDTH - xMin; // (2 * MAP_WIDTH) / 3;
 	function isWithinSlice(position: Coordinate): boolean {
 		return position.x >= xMin && position.x <= xMax;
 	}
@@ -62,9 +55,9 @@ function berserker(hero: Hero, state: State): string {
 		return `MOVE ${MAP_WIDTH / 2} ${MAP_HEIGHT / 2} OOB`;
 	}
 
-	if (state.selfBase.mana < 50) {
+	if (state.selfBase.mana < 30) {
 		const closestMonster = minBy(
-			state.monsters.filter(m => isWithinSlice(m.position)),
+			state.monsters.filter(m => m.isThreatFor !== "opponent" && isWithinSlice(m.position)),
 			m => distanceSquared(m.position, hero.position)
 		);
 		if (closestMonster !== undefined) {
@@ -76,48 +69,36 @@ function berserker(hero: Hero, state: State): string {
 
 	const targetMonster = minBy(
 		state.monsters.filter(
-			m => distance(m.position, hero.position) <= CONTROL_RANGE
+			m => !m.isControlled && m.isThreatFor !== "opponent" && distance(m.position, hero.position) <= CONTROL_RANGE
 		),
 		m => -m.health
 	);
-	if (
-		targetMonster !== undefined &&
-		distance(targetMonster.position, hero.position) <= CONTROL_RANGE
-	) {
+	if (targetMonster !== undefined) {
 		return `SPELL CONTROL ${targetMonster.id} ${state.enemyBase.position.x} ${state.enemyBase.position.y} ZAP`;
 	}
 
 	return `WAIT zZz`;
 }
 
-function defaultGuy(
-	hero: Hero,
-	state: State,
-	defaultPosition?: Coordinate
-): string {
-	const aggressiveMonsters = state.monsters.filter(
-		monster => monster.isTargetingBase === "self"
-	);
-	const closestMonster = minBy(aggressiveMonsters, m =>
-		distanceSquared(m.position, hero.position)
-	);
+function defaultGuy(hero: Hero, state: State, defaultPosition?: Coordinate): string {
+	const aggressiveMonsters = state.monsters.filter(m => m.isThreatFor === "self");
+	const closestMonster = minBy(aggressiveMonsters, m => distanceSquared(m.position, hero.position));
 	if (closestMonster !== undefined) {
-		return `MOVE ${closestMonster.position.x +
-			closestMonster.vx} ${closestMonster.position.y +
+		return `MOVE ${closestMonster.position.x + closestMonster.vx} ${closestMonster.position.y +
 			closestMonster.vy} \>:-O`;
 	} else if (defaultPosition === undefined) {
 		const delta = 2000 * (state.selfBase.position.x === 0 ? 1 : -1);
 		const dx = delta;
 		const dy = delta;
 
-		return `MOVE ${state.selfBase.position.x + dx} ${state.selfBase.position.y +
-			dy} ಠ_ಠ`;
+		return `MOVE ${state.selfBase.position.x + dx} ${state.selfBase.position.y + dy} ಠ_ಠ`;
 	} else {
 		return `MOVE ${defaultPosition.x} ${defaultPosition.y} ಠ_ಠ`;
 	}
 }
 
-const WIND_DISTANCE = 1280;
+const WIND_DISTANCE = 2200;
+const WIND_RANGE = 1280;
 const CONTROL_RANGE = 2200;
 const MAP_WIDTH = 17630;
 const MAP_HEIGHT = 9000;
@@ -138,6 +119,7 @@ export function run() {
 	// game loop
 	while (true) {
 		const selfHeroes: Hero[] = [];
+		const opponentHeroes: Hero[] = [];
 		const monsters: Monster[] = [];
 
 		function buildBaseState(): Omit<Base, "position"> {
@@ -167,27 +149,25 @@ export function run() {
 			const threatFor: number = parseInt(inputs[10]); // Given this monster's trajectory, is it a threat to 1=your base, 2=your opponent's base, 0=neither
 
 			if (type === 0) {
-				const isTargetingBase = nearBase
-					? threatFor === 1
-						? "self"
-						: threatFor === 2
-						? "opponent"
-						: false
-					: false;
 				monsters.push({
 					id,
 					position: { x, y },
 					health,
 					vx,
 					vy,
-					isTargetingBase
+					shieldLife,
+					isControlled: isControlled === 1,
+					isNearBase: nearBase === 1,
+					isThreatFor: threatFor === 1 ? "self" : threatFor === 2 ? "opponent" : "none"
 				});
 			} else if (type === 1) {
 				selfHeroes.push({ id, position: { x, y } });
+			} else if (type === 2) {
+				opponentHeroes.push({ id, position: { x, y } });
 			}
 		}
 
-		const state: State = { selfBase, enemyBase, selfHeroes, monsters };
+		const state: State = { selfBase, enemyBase, selfHeroes, opponentHeroes, monsters };
 		silver(state).forEach(cmd => console.log(cmd));
 	}
 }

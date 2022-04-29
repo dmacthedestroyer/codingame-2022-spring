@@ -14,7 +14,10 @@ export type Monster = {
 	health: number;
 	vx: number;
 	vy: number;
-	isTargetingBase: "self" | "opponent" | false;
+	shieldLife: number;
+	isControlled: boolean;
+	isNearBase: boolean;
+	isThreatFor: "self" | "opponent" | "none";
 };
 
 export type Base = {
@@ -27,6 +30,7 @@ export type State = {
 	selfBase: Base;
 	enemyBase: Base;
 	selfHeroes: Hero[];
+	opponentHeroes: Hero[];
 	monsters: Monster[];
 };
 
@@ -77,10 +81,7 @@ export function sortBy<T, TValue>(ts: T[], f: (t: T) => TValue): T[] {
 	return copy;
 }
 
-export function countBy<T, TKey>(
-	ts: T[],
-	keyFunc: (t: T) => TKey
-): Map<TKey, number> {
+export function countBy<T, TKey>(ts: T[], keyFunc: (t: T) => TKey): Map<TKey, number> {
 	return ts.reduce((counts, t) => {
 		const key = keyFunc(t);
 		counts.set(key, (counts.get(key) ?? 0) + 1);

@@ -1,4 +1,7 @@
 import { Base, Coordinate, distance, distanceSquared, Hero, minBy, Monster, sortBy, State } from "./state";
+import { randBetween, floor } from "./util";
+
+// TODO: make better harasser
 
 function silver(state: State): string[] {
 	return state.selfHeroes.map((hero, i) => {
@@ -8,44 +11,41 @@ function silver(state: State): string[] {
 		if (i === 1) {
 			return berserker(hero, state);
 		}
-		return defaultGuy(hero, state);
+		return harasser(hero, state);
 	});
 }
 
+/**
+ * if position close enough to base and enemies are present and we have mana, cast wind towards enemy base
+ * else if enemies are present, move towards nearest enemy's next location
+ * else sit at idle position
+ */
 function goalie(hero: Hero, state: State): string {
-	if (state.selfBase.mana < 10) {
-		return defaultGuy(hero, state);
-	}
+	const enemyTriggerDistance = 8000;
+	const windTriggerDistance = 800;
+	const idleDistance = 1200;
 
-	const basePosition = state.selfBase.position;
+	const selfBasePosition = state.selfBase.position;
 
-	const closestMonster = minBy(
-		state.monsters.filter(m => m.shieldLife <= 0),
-		m => distanceSquared(basePosition, m.position)
-	);
+	const eligibleMonsters = state.monsters.filter(m => distance(m.position, selfBasePosition) <= enemyTriggerDistance);
+	const closestMonster = minBy(eligibleMonsters, m => distanceSquared(selfBasePosition, m.position));
+
 	if (closestMonster !== undefined) {
-		const monsterFuturePosition = {
-			x: closestMonster.position.x + closestMonster.vx,
-			y: closestMonster.position.y + closestMonster.vy
-		};
-		const monsterDistanceFromBase = distance(monsterFuturePosition, basePosition);
-		if (state.selfBase.mana >= 10 && monsterDistanceFromBase < WIND_RANGE * 0.75) {
-			return `SPELL WIND ${state.enemyBase.position.x} ${state.enemyBase.position.y} FUS`;
+		if (distance(closestMonster.position, selfBasePosition) <= windTriggerDistance) {
+			if (closestMonster.shieldLife <= 0 && state.selfBase.mana >= 10) {
+				return `SPELL WIND ${state.enemyBase.position.x} ${state.enemyBase.position.y} FUS`;
+			}
 		}
+		return `MOVE ${closestMonster.position.x + closestMonster.vx * 2} ${closestMonster.position.y +
+			closestMonster.vy * 2} BEGONE!`;
 	}
 
-	if (state.selfBase.mana >= 10) {
-		const closestOpponentHero = minBy(state.opponentHeroes, h => distanceSquared(hero.position, h.position));
-		if (closestOpponentHero !== undefined && distance(closestOpponentHero.position, hero.position) <= WIND_RANGE) {
-			return `SPELL WIND ${closestOpponentHero.position.x} ${closestOpponentHero.position.y} GIT!`;
-		}
-	}
-
-	const delta = (WIND_DISTANCE - WIND_RANGE) * (basePosition.x === 0 ? 1 : -1);
-	return `MOVE ${basePosition.x + delta} ${basePosition.y + delta} ಠ_ಠ`;
+	const delta = idleDistance * (selfBasePosition.x === 0 ? 1 : -1);
+	return `MOVE ${selfBasePosition.x + delta} ${selfBasePosition.y + delta} ಠ_ಠ`;
 }
 
 function berserker(hero: Hero, state: State): string {
+	const manaMin = 30;
 	const xMin = 6000; // MAP_WIDTH / 3;
 	const xMax = MAP_WIDTH - xMin; // (2 * MAP_WIDTH) / 3;
 	function isWithinSlice(position: Coordinate): boolean {
@@ -64,41 +64,68 @@ function berserker(hero: Hero, state: State): string {
 			return `MOVE ${closestMonster.position.x} ${closestMonster.position.y} FFUUU`;
 		}
 
-		return `MOVE ${MAP_WIDTH / 2} ${MAP_HEIGHT / 2}`;
+		return `MOVE ${floor(randBetween(xMin, xMax))} ${floor(randBetween(0, MAP_HEIGHT))} RECHARGE`;
 	}
 
 	const targetMonster = minBy(
-		state.monsters.filter(
-			m => !m.isControlled && m.isThreatFor !== "opponent" && distance(m.position, hero.position) <= CONTROL_RANGE
-		),
+		state.monsters.filter(m => {
+			if (m.isControlled || m.isThreatFor === "opponent") {
+				return false;
+			}
+			const distanceToHero = distance(m.position, hero.position);
+			return distanceToHero > ATTACK_RANGE && distanceToHero <= CONTROL_RANGE;
+		}),
 		m => -m.health
 	);
 	if (targetMonster !== undefined) {
-		return `SPELL CONTROL ${targetMonster.id} ${state.enemyBase.position.x} ${state.enemyBase.position.y} ZAP`;
+		return `SPELL CONTROL ${targetMonster.id} ${state.enemyBase.position.x} ${state.enemyBase.position.y} WOLOLO`;
 	}
 
-	return `WAIT zZz`;
+	return `MOVE ${floor(randBetween(xMin, xMax))} ${floor(randBetween(0, MAP_HEIGHT))} ಠ_ಠ`;
 }
 
-function defaultGuy(hero: Hero, state: State, defaultPosition?: Coordinate): string {
-	const aggressiveMonsters = state.monsters.filter(m => m.isThreatFor === "self");
-	const closestMonster = minBy(aggressiveMonsters, m => distanceSquared(m.position, hero.position));
-	if (closestMonster !== undefined) {
-		return `MOVE ${closestMonster.position.x + closestMonster.vx} ${closestMonster.position.y +
-			closestMonster.vy} \>:-O`;
-	} else if (defaultPosition === undefined) {
-		const delta = 2000 * (state.selfBase.position.x === 0 ? 1 : -1);
-		const dx = delta;
-		const dy = delta;
-
-		return `MOVE ${state.selfBase.position.x + dx} ${state.selfBase.position.y + dy} ಠ_ಠ`;
-	} else {
-		return `MOVE ${defaultPosition.x} ${defaultPosition.y} ಠ_ಠ`;
+function harasser(hero: Hero, state: State): string {
+	const idleDistance = SHIELD_RANGE;
+	if (distance(hero.position, state.enemyBase.position) > idleDistance * 4) {
+		const enemyBasePosition = state.enemyBase.position;
+		const delta = idleDistance * (enemyBasePosition.x === 0 ? 1 : -1);
+		return `MOVE ${enemyBasePosition.x + delta} ${enemyBasePosition.y + delta} HEHEHE`;
 	}
+
+	if (state.selfBase.mana >= 30) {
+		const targetMonsters = state.monsters
+			.map(m => {
+				const distanceToEnemyBase = distance(m.position, state.enemyBase.position);
+				const distanceToHero = distance(m.position, hero.position);
+				return {
+					distanceToEnemyBase,
+					canUseWind: m.shieldLife <= 0 && distanceToHero <= WIND_RANGE,
+					canUseShield: m.shieldLife <= 0 && distanceToHero <= SHIELD_RANGE,
+					...m
+				};
+			})
+			.filter(m => m.distanceToEnemyBase < idleDistance);
+
+		// push any monsters that aren't shielded
+		if (targetMonsters.filter(m => m.canUseWind).length > 0) {
+			return `SPELL WIND ${state.enemyBase.position.x} ${state.enemyBase.position.y} FUS`;
+		}
+		const shieldableMonster = minBy(
+			targetMonsters.filter(m => m.canUseShield),
+			m => m.distanceToEnemyBase
+		);
+		if (shieldableMonster !== undefined) {
+			return `SPELL SHIELD ${shieldableMonster.id}`;
+		}
+	}
+
+	return `WAIT ಠ_ಠ`;
 }
 
+const ATTACK_RANGE = 800;
 const WIND_DISTANCE = 2200;
 const WIND_RANGE = 1280;
+const SHIELD_RANGE = 2200;
 const CONTROL_RANGE = 2200;
 const MAP_WIDTH = 17630;
 const MAP_HEIGHT = 9000;
